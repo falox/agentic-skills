@@ -1,143 +1,51 @@
-# investigate-alert skill eval test cases
-#
-# All tests are framed around the skill's core workflow: an alert fires,
-# and the agent follows the investigation protocol to determine root cause.
-#
-# Static tests verify tool-selection and protocol knowledge — given a step
-# in the investigation, the agent must pick the correct diagnostic script.
-#
-# Mock-based tests embed canned tool output and verify the agent
-# interprets diagnostic data correctly in an alert context.
-
-# --- Static tool-selection tests ---
-
-- name: query_firing_alert
-  query: "Alert KubePodCrashLooping is firing. Which investigate-alert diagnostic script should you run to check how many instances are firing and get their full label sets?"
+- name: trace_database_connections
+  query: |
+    The orders API returns 503 when it cannot get a database connection.
+    The database has 100 connections and a limit of 100. Its session history
+    shows that reporting-worker keeps 98 idle connections after its jobs end.
+    Which workload should the fix target?
   schema:
     type: object
     properties:
-      script:
-        type: string
-        enum: ["query-alert.sh", "fetch-alert-rule.sh", "get-firing-alerts.sh", "prometheus-query.sh", "discover-metrics.sh"]
-        description: "The script that queries firing instances of a named alert. Use the 'investigate-alert' skill to find this."
-    required: [script]
+      workload: {type: string}
+    required: [workload]
   expected:
-    script: "query-alert.sh"
+    workload: reporting-worker
 
-- name: fetch_alert_rule
-  query: "You are investigating alert KubeDeploymentReplicasMismatch. Which investigate-alert diagnostic script retrieves its PromQL expression, thresholds, and annotations?"
+- name: resolve_blocked_deployment
+  query: |
+    The checkout Deployment cannot create pods. Its ReplicaSet reports that
+    the requested CPU exceeds the maximum in the namespace LimitRange.
+    The namespace policy must stay in place. What should the admin do?
   schema:
     type: object
     properties:
-      script:
+      action:
         type: string
-        enum: ["query-alert.sh", "fetch-alert-rule.sh", "get-firing-alerts.sh", "prometheus-query.sh", "discover-metrics.sh"]
-        description: "The script that fetches the alert rule definition. Use the 'investigate-alert' skill to find this."
-    required: [script]
+        enum: [adjust_deployment_cpu, raise_namespace_limit, restart_controller]
+    required: [action]
   expected:
-    script: "fetch-alert-rule.sh"
+    action: adjust_deployment_cpu
 
-- name: diagnose_pod_from_alert
-  query: "You are investigating alert KubePodCrashLooping. The alert labels show pod web-frontend-7b9d4 in namespace production. Which investigate-alert diagnostic script should you use to inspect this pod's status, conditions, and events?"
+- name: explain_hpa_condition
+  query: |
+    The checkout HPA reports FailedGetResourceMetric because container api
+    has no CPU request. The target Deployment confirms api has no CPU request.
+    What is the next step?
   schema:
     type: object
     properties:
-      script:
+      next_step:
         type: string
-        enum: ["diagnose-pod.sh", "diagnose-workload.sh", "diagnose-node.sh", "get-events.sh", "get-firing-alerts.sh"]
-        description: "The script for pod-level diagnostics. Use the 'investigate-alert' skill to find this."
-    required: [script]
+        enum: [collect_pod_logs, recommend_cpu_request, query_historical_cpu]
+    required: [next_step]
   expected:
-    script: "diagnose-pod.sh"
-
-- name: diagnose_node_from_alert
-  query: "You are investigating alert KubeNodeNotReady. The alert labels point to node worker-3. Which investigate-alert diagnostic script provides node conditions, capacity, taints, and kubelet info?"
-  schema:
-    type: object
-    properties:
-      script:
-        type: string
-        enum: ["diagnose-node.sh", "diagnose-pod.sh", "diagnose-operator.sh", "get-events.sh", "check-recent-changes.sh"]
-        description: "The script for node diagnostics. Use the 'investigate-alert' skill to find this."
-    required: [script]
-  expected:
-    script: "diagnose-node.sh"
-
-- name: diagnose_operator_from_alert
-  query: "You are investigating alert ClusterOperatorDegraded. The alert labels show operator name 'authentication'. Which investigate-alert diagnostic script checks its health, conditions, and versions?"
-  schema:
-    type: object
-    properties:
-      script:
-        type: string
-        enum: ["diagnose-operator.sh", "diagnose-workload.sh", "diagnose-pod.sh", "get-firing-alerts.sh", "check-recent-changes.sh"]
-        description: "The script for ClusterOperator diagnostics. Use the 'investigate-alert' skill to find this."
-    required: [script]
-  expected:
-    script: "diagnose-operator.sh"
-
-- name: check_changes_during_alert
-  query: "You are investigating alert KubeDeploymentReplicasMismatch in namespace checkout. You need to check what changed recently that may have triggered this alert. Which investigate-alert diagnostic script detects recent rollouts, image pulls, and scaling events?"
-  schema:
-    type: object
-    properties:
-      script:
-        type: string
-        enum: ["check-recent-changes.sh", "get-events.sh", "diagnose-workload.sh", "get-firing-alerts.sh", "diagnose-pod.sh"]
-        description: "The script for detecting recent cluster changes. Use the 'investigate-alert' skill to find this."
-    required: [script]
-  expected:
-    script: "check-recent-changes.sh"
-
-- name: prometheus_setup
-  query: "Which script do the investigate-alert skill's Prometheus tools call automatically to configure access credentials when TOKEN or THANOS_URL is missing?"
-  schema:
-    type: object
-    properties:
-      script:
-        type: string
-        enum: ["prometheus-setup.sh", "prometheus-query.sh", "discover-metrics.sh", "get-firing-alerts.sh"]
-        description: "The script that sets up Prometheus credentials. Use the 'investigate-alert' skill to find this."
-    required: [script]
-  expected:
-    script: "prometheus-setup.sh"
-
-- name: first_investigation_step
-  query: "According to the investigate-alert investigation protocol, what is the first command you must run in Step 2 to query firing instances of KubePodCrashLooping?"
-  schema:
-    type: object
-    properties:
-      command:
-        type: string
-        enum:
-          - "bash scripts/query-alert.sh KubePodCrashLooping"
-          - "bash scripts/get-firing-alerts.sh"
-          - "bash scripts/diagnose-pod.sh"
-          - "bash scripts/get-events.sh"
-        description: "The first command in the investigation protocol. Use the 'investigate-alert' skill to find this."
-    required: [command]
-  expected:
-    command: "bash scripts/query-alert.sh KubePodCrashLooping"
-
-- name: step3_mandatory_logs
-  query: "You are investigating alert KubeDeploymentReplicasMismatch. You have already run diagnose-workload.sh for the affected deployment. According to the investigation protocol Step 3, what must you also run for every workload to collect container logs, even if the workload appears healthy?"
-  schema:
-    type: object
-    properties:
-      tool:
-        type: string
-        enum: ["diagnose-pod.sh --logs", "get-events.sh", "check-recent-changes.sh", "prometheus-query.sh"]
-        description: "The additional evidence to collect per workload in Step 3. Use the 'investigate-alert' skill to find this."
-    required: [tool]
-  expected:
-    tool: "diagnose-pod.sh --logs"
-
-# --- Mock-based diagnostic reasoning tests ---
+    next_step: recommend_cpu_request
 
 - name: interpret_firing_alert
   query: |
-    You are investigating alert KubeDeploymentReplicasMismatch. You ran query-alert.sh and got:
-    {"alert_name":"KubeDeploymentReplicasMismatch","firing":true,"instance_count":2,"instances":[{"metric":{"__name__":"ALERTS","alertname":"KubeDeploymentReplicasMismatch","namespace":"checkout","deployment":"payment-gateway","severity":"warning"},"value":[1721203200,"1"]},{"metric":{"__name__":"ALERTS","alertname":"KubeDeploymentReplicasMismatch","namespace":"checkout","deployment":"order-service","severity":"warning"},"value":[1721203200,"1"]}]}
+    You are investigating alert KubeDeploymentReplicasMismatch. The query for its firing instances returned:
+    [{"metric":{"alertname":"KubeDeploymentReplicasMismatch","alertstate":"firing","namespace":"checkout","deployment":"payment-gateway"},"value":[1721203200,"1"]},{"metric":{"alertname":"KubeDeploymentReplicasMismatch","alertstate":"firing","namespace":"checkout","deployment":"order-service"},"value":[1721203200,"1"]}]
     Based on this output: is the alert firing, how many instances are affected, and in which namespace?
   schema:
     type: object
@@ -160,7 +68,7 @@
 
 - name: interpret_pod_oomkilled
   query: |
-    You are investigating alert KubePodCrashLooping. The alert labels pointed to pod api-server-6f8b9c-xk2lm in namespace payments. You ran diagnose-pod.sh and got this output:
+    You are investigating alert KubePodCrashLooping. The alert labels pointed to pod api-server-6f8b9c-xk2lm in namespace payments. You collected this pod evidence:
     {"pods":[{"name":"api-server-6f8b9c-xk2lm","namespace":"payments","phase":"Running","conditions":[{"type":"Ready","status":"False"},{"type":"ContainersReady","status":"False"}],"container_statuses":[{"name":"api","state":{"waiting":{"reason":"CrashLoopBackOff"}},"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137,"finishedAt":"2026-07-17T08:15:00Z"}},"restartCount":12,"ready":false}],"node_name":"worker-2","restart_count":12,"events":[{"type":"Warning","reason":"BackOff","message":"Back-off restarting failed container api in pod api-server-6f8b9c-xk2lm_payments"}]}]}
     What is the root cause of this pod's failure?
   schema:
